@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JobAround - Research Dashboard</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #0284c7;
+            --border: #334155;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: monospace;
+            padding: 2rem;
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: var(--accent);
+            margin-bottom: 0.5rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin: 2rem 0;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            padding: 1.25rem;
+            border-radius: 8px;
+        }
+
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #38bdf8;
+            margin-top: 0.5rem;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        .actions {
+            margin-bottom: 1.5rem;
+            display: flex;
+            gap: 1rem;
+        }
+
+        button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0.6rem 1.2rem;
+            border-radius: 4px;
+            font-weight: bold;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--card-bg);
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        th, td {
+            padding: 0.8rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.85rem;
+        }
+
+        th {
+            background: #0f172a;
+            color: var(--text-muted);
+        }
+
+        #auth-warning {
+            display: none;
+            background: #7f1d1d;
+            color: white;
+            padding: 1rem;
+            border-radius: 6px;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔬 JobAround Research Dashboard</h1>
+        <p style="color:var(--text-muted);">Pannello di controllo dell'esperimento comportamentale sul nudging.</p>
+
+        <div id="auth-warning">
+            ⚠️ Accesso non autorizzato. Aggiungi <code>?research=true</code> all'URL per sbloccare la modalità ricercatore.
+        </div>
+
+        <div id="dashboard-content" style="display: none;">
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Partecipanti Totali</div>
+                    <div class="stat-value" id="stat-count">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Media Tempo Click</div>
+                    <div class="stat-value" id="stat-mean">0s</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Mediana Tempo Click</div>
+                    <div class="stat-value" id="stat-median">0s</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Minimo Tempo</div>
+                    <div class="stat-value" id="stat-min">0s</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Massimo Tempo</div>
+                    <div class="stat-value" id="stat-max">0s</div>
+                </div>
+            </div>
+
+            <div class="actions">
+                <button id="btn-export-csv">Esporta CSV</button>
+                <button id="btn-export-json">Esporta JSON</button>
+                <button id="btn-refresh" style="background:#334155;">Ricarica Dati</button>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Session ID</th>
+                        <th>Entrata (UTC)</th>
+                        <th>Click (UTC)</th>
+                        <th>TimeToApply (s)</th>
+                        <th>Pulsante</th>
+                    </tr>
+                </thead>
+                <tbody id="data-table-body">
+                    <tr><td colspan="5">Caricamento dati in corso...</td></tr>
+                </tbody>
+            </table>
+
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // CREDENZIALI FIREBASE (Stesse inserite in index.html)
+        const firebaseConfig = {
+          apiKey: "AIzaSyAw1OaEm9cLBXD8WD1KcjcGstPo5n5h29g",
+    authDomain: "tesi-d1c9b.firebaseapp.com",
+    projectId: "tesi-d1c9b",
+    storageBucket: "tesi-d1c9b.firebasestorage.app",
+    messagingSenderId: "169501393766",
+    appId: "1:169501393766:web:3b1238e440816da6693ea7"  
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        let sessionsData = [];
+
+        function checkAuth() {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('research') === 'true') {
+                document.getElementById('dashboard-content').style.display = 'block';
+                loadData();
+            } else {
+                document.getElementById('auth-warning').style.display = 'block';
+            }
+        }
+
+        async function loadData() {
+            const tbody = document.getElementById('data-table-body');
+            tbody.innerHTML = '<tr><td colspan="5">Interrogazione Firestore...</td></tr>';
+
+            try {
+                const q = query(collection(db, "experiments", "jobaround", "sessions"));
+                const querySnapshot = await getDocs(q);
+                
+                sessionsData = [];
+                querySnapshot.forEach((doc) => {
+                    sessionsData.push(doc.data());
+                });
+
+                renderStats();
+                renderTable();
+
+            } catch (error) {
+                console.error("Errore recupero dati:", error);
+                tbody.innerHTML = `<tr><td colspan="5" style="color:#ef4444;">Errore: ${error.message}</td></tr>`;
+            }
+        }
+
+        function renderStats() {
+            if (sessionsData.length === 0) return;
+
+            const times = sessionsData.map(d => d.timeToApply).filter(t => typeof t === 'number').sort((a,b) => a - b);
+            
+            const count = times.length;
+            const sum = times.reduce((a, b) => a + b, 0);
+            const mean = sum / count;
+            const min = times[0];
+            const max = times[times.length - 1];
+            
+            let median = 0;
+            const mid = Math.floor(times.length / 2);
+            if (times.length % 2 === 0) {
+                median = (times[mid - 1] + times[mid]) / 2;
+            } else {
+                median = times[mid];
+            }
+
+            document.getElementById('stat-count').textContent = count;
+            document.getElementById('stat-mean').textContent = `${mean.toFixed(2)}s`;
+            document.getElementById('stat-median').textContent = `${median.toFixed(2)}s`;
+            document.getElementById('stat-min').textContent = `${min.toFixed(2)}s`;
+            document.getElementById('stat-max').textContent = `${max.toFixed(2)}s`;
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('data-table-body');
+            tbody.innerHTML = '';
+
+            if (sessionsData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5">Nessun dato registrato.</td></tr>';
+                return;
+            }
+
+            sessionsData.forEach(row => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td style="color:#38bdf8;">${row.sessionId || '-'}</td>
+                    <td>${row.entryTime ? row.entryTime.replace('T', ' ').substring(0,19) : '-'}</td>
+                    <td>${row.clickTime ? row.clickTime.replace('T', ' ').substring(0,19) : '-'}</td>
+                    <td><strong>${row.timeToApply ? row.timeToApply.toFixed(2) + 's' : '-'}</strong></td>
+                    <td><code>${row.button || '-'}</code></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function exportCSV() {
+            if (sessionsData.length === 0) return alert("Nessun dato da esportare.");
+            
+            const headers = ["sessionId", "entryTime", "clickTime", "timeToApply", "timeOnPage", "button", "countdownRemainingAtClick"];
+            const csvRows = [headers.join(",")];
+
+            sessionsData.forEach(row => {
+                const values = headers.map(h => {
+                    const val = row[h] !== undefined ? row[h] : '';
+                    return `"${val}"`;
+                });
+                csvRows.push(values.join(","));
+            });
+
+            downloadFile(csvRows.join("\n"), "jobaround_experiment_data.csv", "text/csv");
+        }
+
+        function exportJSON() {
+            if (sessionsData.length === 0) return alert("Nessun dato da esportare.");
+            downloadFile(JSON.stringify(sessionsData, null, 2), "jobaround_experiment_data.json", "application/json");
+        }
+
+        function downloadFile(content, filename, type) {
+            const blob = new Blob([content], { type: type });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        // Listeners
+        document.getElementById('btn-export-csv').addEventListener('click', exportCSV);
+        document.getElementById('btn-export-json').addEventListener('click', exportJSON);
+        document.getElementById('btn-refresh').addEventListener('click', loadData);
+
+        checkAuth();
+    </script>
+</body>
+</html>
